@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration packages="homecontrol.log4j">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="[%d{HH:mm:ss.SSS}] [%t/%level] %logger{1} - %msg%n"/>
+        </Console>
+        <FileWithRecentDump name="FileDump">
+            <PatternLayout pattern="[%d{HH:mm:ss.SSS}] [%t/%level] %logger{1} - %msg%n"/>
+        </FileWithRecentDump>
+    </Appenders>
+    <Loggers>        
+        <Root level="trace">
+            <AppenderRef ref="Console"/>
+            <AppenderRef ref="FileDump"/>
+        </Root>
+    </Loggers>
+</Configuration>

@@ -14,6 +14,8 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -24,11 +26,9 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -50,12 +50,18 @@ import jssc.SerialPortEventListener;
 import jssc.SerialPortException;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartPanel;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.plot.XYPlot;
 import org.jfree.data.xy.DefaultXYDataset;
 import org.jfree.data.xy.XYDataset;
+import ru.mikhailmineev.config.ApplicationUtility;
+import ru.mikhailmineev.config.PreventStartupException;
+import ru.mikhailmineev.config.exceptions.ConfigSyncFailException;
+import ru.mikhailmineev.hallsensorapplication.config.ConfigManager;
 
 /**
  *
@@ -63,16 +69,21 @@ import org.jfree.data.xy.XYDataset;
  */
 public class NewJFrame extends javax.swing.JFrame {
 
+    public static final String APPLICATION_NAME = "HallSensorApplication";
+    private static NewJFrame instance;
     private static ZoneId ofOffset = ZoneId.ofOffset("GMT", ZoneOffset.ofHours(3));
     public static DateTimeFormatter formatter
             = DateTimeFormatter.ofPattern("yyyy-MM-dd HH.mm.ss")
             .withLocale(Locale.UK)
             .withZone(ofOffset);
 
-    private static final int SIZE = 6;
+    public static NewJFrame getInstance() {
+        return instance;
+    }
+
+    private static final int SIZE = 3;
 
     private static SerialPort serialPort;
-    private static NewJFrame instance;
 
     private final Writer writer;
 
@@ -81,20 +92,40 @@ public class NewJFrame extends javax.swing.JFrame {
     private boolean runtime = true;
     private Thread runtimer;
     private long mseconds;
+    private static final Logger logger = LogManager.getLogger();
+    private File workDir;
+    private ConfigManager configmanager;
+
+    static {
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            logger.error("Uncaught exception!", e);
+        });
+
+    }
 
     /**
      * Creates new form NewJFrame
      */
-    public NewJFrame() {
+    public NewJFrame(File workDir) {
+        this.workDir = workDir;
+        try {
+            this.configmanager = new ConfigManager(workDir);
+        } catch (PreventStartupException ex) {
+        }
         initComponents();
-        this.setLocationRelativeTo(null);
+
+        String port = configmanager.getConfig().getPort();
+        int speed = configmanager.getConfig().getSpeed();
+        connectPort.setText(port);
+        connectSpeed.setText(Integer.toString(speed));
+
         recordButton.setEnabled(false);
         stopButton.setEnabled(false);
         zerosetbutton.setEnabled(false);
         zerotextx.setText("Ноль x=" + xzero);
         zerotexty.setText("Ноль y=" + yzero);
         zerotextz.setText("Ноль z=" + zzero);
-        JLabel[] fields = {s1value, s2value, s3value, s4value, s5value, s6value};
+        JLabel[] fields = {s1value, s2value, s3value};
         writer = new Writer(fields);
         dataset = new DefaultXYDataset();
 
@@ -104,18 +135,17 @@ public class NewJFrame extends javax.swing.JFrame {
         JFreeChart chart = createChart(dataset);
         ChartPanel chartPanel = new ChartPanel(chart);
         plotArea.add(chartPanel, BorderLayout.CENTER);
+
+        configmanager.getConfig().getFrame().loadOrDefaults(this, false);
     }
 
     DefaultXYDataset dataset;
 
     private double[] x1;
-    private double[] x2;
     private double xzero = 0;
     private double[] y1;
-    private double[] y2;
     private double yzero = 0;
     private double[] z1;
-    private double[] z2;
     private double zzero = 0;
     //private double[] v1;
     //private double[] v2;
@@ -128,16 +158,13 @@ public class NewJFrame extends javax.swing.JFrame {
         }
         int size = matrix.size() / avg;
         x1 = new double[size];
-        x2 = new double[size];
         y1 = new double[size];
-        y2 = new double[size];
         z1 = new double[size];
-        z2 = new double[size];
         //v1 = new double[matrix.size()];
         //v2 = new double[matrix.size()];
         tao = new double[size];
-        double[][] vertical = {x1, y1, z1, x2, y2, z2};
-        double[] zeros = {xzero, yzero, zzero, 0, 0, 0};
+        double[][] vertical = {x1, y1, z1};
+        double[] zeros = {xzero, yzero, zzero};
 
         for (int i = 0; i < size; i++) {
             double time = mseconds / 1000.0;
@@ -173,19 +200,6 @@ public class NewJFrame extends javax.swing.JFrame {
             double[][] data = {tao, z1};
             dataset.addSeries("z", data);
         }
-        if (xlineamp.isSelected()) {
-            double[][] data = {tao, x2};
-            dataset.addSeries("xamp", data);
-        }
-        if (ylineamp.isSelected()) {
-            double[][] data = {tao, y2};
-            dataset.addSeries("yamp", data);
-        }
-        if (zlineamp.isSelected()) {
-            double[][] data = {tao, z2};
-            dataset.addSeries("zamp", data);
-        }
-
     }
 
     private JFreeChart createChart(XYDataset dataset) {
@@ -218,7 +232,6 @@ public class NewJFrame extends javax.swing.JFrame {
     private void initComponents() {
         GridBagConstraints gridBagConstraints;
 
-        status = new JLabel();
         jPanel1 = new JPanel();
         jLabel2 = new JLabel();
         s1value = new JLabel();
@@ -226,11 +239,6 @@ public class NewJFrame extends javax.swing.JFrame {
         s2value = new JLabel();
         jLabel4 = new JLabel();
         s3value = new JLabel();
-        jLabel6 = new JLabel();
-        jLabel7 = new JLabel();
-        s4value = new JLabel();
-        s5value = new JLabel();
-        s6value = new JLabel();
         jPanel2 = new JPanel();
         connectPort = new JTextField();
         jLabel1 = new JLabel();
@@ -257,67 +265,63 @@ public class NewJFrame extends javax.swing.JFrame {
         xline = new JCheckBox();
         yline = new JCheckBox();
         zline = new JCheckBox();
-        xlineamp = new JCheckBox();
-        ylineamp = new JCheckBox();
-        zlineamp = new JCheckBox();
         jMenuBar1 = new JMenuBar();
         jMenu1 = new JMenu();
         openfilebutton = new JMenuItem();
         savefilebutton = new JMenuItem();
 
-        setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         setTitle("Hall sensor");
         setMinimumSize(new Dimension(600, 300));
+        addWindowListener(new WindowAdapter() {
+            public void windowClosing(WindowEvent evt) {
+                formWindowClosing(evt);
+            }
+        });
         GridBagLayout layout = new GridBagLayout();
         layout.columnWidths = new int[] {0, 5, 0};
-        layout.rowHeights = new int[] {0, 5, 0, 5, 0, 5, 0, 5, 0};
+        layout.rowHeights = new int[] {0, 5, 0, 5, 0, 5, 0};
         getContentPane().setLayout(layout);
-
-        status.setText("ok");
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 8;
-        gridBagConstraints.gridwidth = 3;
-        gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
-        getContentPane().add(status, gridBagConstraints);
 
         jPanel1.setBorder(BorderFactory.createTitledBorder("Текущие значения"));
         GridBagLayout jPanel1Layout = new GridBagLayout();
-        jPanel1Layout.columnWidths = new int[] {0, 5, 0, 5, 0};
-        jPanel1Layout.rowHeights = new int[] {0, 5, 0, 5, 0, 5, 0};
+        jPanel1Layout.columnWidths = new int[] {0, 5, 0};
+        jPanel1Layout.rowHeights = new int[] {0, 5, 0, 5, 0};
         jPanel1.setLayout(jPanel1Layout);
 
         jLabel2.setText("Датчик x:");
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 2;
+        gridBagConstraints.gridy = 0;
         gridBagConstraints.anchor = GridBagConstraints.LINE_START;
-        gridBagConstraints.weightx = 1.0;
         jPanel1.add(jLabel2, gridBagConstraints);
 
         s1value.setText("-");
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 2;
-        gridBagConstraints.gridy = 2;
+        gridBagConstraints.gridy = 0;
+        gridBagConstraints.anchor = GridBagConstraints.LINE_START;
+        gridBagConstraints.weightx = 1.0;
         jPanel1.add(s1value, gridBagConstraints);
 
         jLabel3.setText("Датчик y:");
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 4;
+        gridBagConstraints.gridy = 2;
         gridBagConstraints.anchor = GridBagConstraints.LINE_START;
         jPanel1.add(jLabel3, gridBagConstraints);
 
         s2value.setText("-");
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 2;
-        gridBagConstraints.gridy = 4;
+        gridBagConstraints.gridy = 2;
+        gridBagConstraints.anchor = GridBagConstraints.LINE_START;
         jPanel1.add(s2value, gridBagConstraints);
 
         jLabel4.setText("Датчик z:");
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 6;
+        gridBagConstraints.gridy = 4;
         gridBagConstraints.anchor = GridBagConstraints.FIRST_LINE_START;
         gridBagConstraints.weighty = 1.0;
         jPanel1.add(jLabel4, gridBagConstraints);
@@ -325,42 +329,9 @@ public class NewJFrame extends javax.swing.JFrame {
         s3value.setText("-");
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 2;
-        gridBagConstraints.gridy = 6;
-        gridBagConstraints.anchor = GridBagConstraints.PAGE_START;
-        jPanel1.add(s3value, gridBagConstraints);
-
-        jLabel6.setText("Неусил.");
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 2;
-        gridBagConstraints.gridy = 0;
-        gridBagConstraints.weightx = 1.0;
-        jPanel1.add(jLabel6, gridBagConstraints);
-
-        jLabel7.setText("Усил.");
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 4;
-        gridBagConstraints.gridy = 0;
-        gridBagConstraints.weightx = 1.0;
-        jPanel1.add(jLabel7, gridBagConstraints);
-
-        s4value.setText("-");
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 4;
-        gridBagConstraints.gridy = 2;
-        jPanel1.add(s4value, gridBagConstraints);
-
-        s5value.setText("-");
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 4;
         gridBagConstraints.gridy = 4;
-        jPanel1.add(s5value, gridBagConstraints);
-
-        s6value.setText("-");
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 4;
-        gridBagConstraints.gridy = 6;
-        gridBagConstraints.anchor = GridBagConstraints.PAGE_START;
-        jPanel1.add(s6value, gridBagConstraints);
+        gridBagConstraints.anchor = GridBagConstraints.FIRST_LINE_START;
+        jPanel1.add(s3value, gridBagConstraints);
 
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 0;
@@ -553,7 +524,7 @@ public class NewJFrame extends javax.swing.JFrame {
         jPanel5.setBorder(BorderFactory.createTitledBorder("График"));
         GridBagLayout jPanel5Layout = new GridBagLayout();
         jPanel5Layout.columnWidths = new int[] {0, 5, 0, 5, 0};
-        jPanel5Layout.rowHeights = new int[] {0, 5, 0, 5, 0, 5, 0, 5, 0, 5, 0, 5, 0};
+        jPanel5Layout.rowHeights = new int[] {0, 5, 0, 5, 0, 5, 0};
         jPanel5.setLayout(jPanel5Layout);
 
         jLabel10.setText("Усреднять каждые:");
@@ -625,45 +596,6 @@ public class NewJFrame extends javax.swing.JFrame {
         gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
         jPanel5.add(zline, gridBagConstraints);
 
-        xlineamp.setText("Ось x усиленный сигнал");
-        xlineamp.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent evt) {
-                xlineampActionPerformed(evt);
-            }
-        });
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 8;
-        gridBagConstraints.gridwidth = 5;
-        gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
-        jPanel5.add(xlineamp, gridBagConstraints);
-
-        ylineamp.setText("Ось y усиленный сигнал");
-        ylineamp.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent evt) {
-                ylineampActionPerformed(evt);
-            }
-        });
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 10;
-        gridBagConstraints.gridwidth = 5;
-        gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
-        jPanel5.add(ylineamp, gridBagConstraints);
-
-        zlineamp.setText("Ось z усиленный сигнал");
-        zlineamp.addActionListener(new ActionListener() {
-            public void actionPerformed(ActionEvent evt) {
-                zlineampActionPerformed(evt);
-            }
-        });
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 0;
-        gridBagConstraints.gridy = 12;
-        gridBagConstraints.gridwidth = 5;
-        gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
-        jPanel5.add(zlineamp, gridBagConstraints);
-
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 0;
         gridBagConstraints.gridy = 4;
@@ -719,12 +651,14 @@ public class NewJFrame extends javax.swing.JFrame {
         } catch (SerialPortException ex) {
             String type = ex.getExceptionType();
             if (type.equals("Port busy")) {
-                JOptionPane.showMessageDialog(this, "Порт занят!", "Ошибка", JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(this, "Порт " + connectPort.getText() + " занят!", "Ошибка", JOptionPane.ERROR_MESSAGE);
+            } else if (type.equals("Port not found")) {
+                JOptionPane.showMessageDialog(this, "Порт " + connectPort.getText() + " не найден!", "Ошибка", JOptionPane.ERROR_MESSAGE);
             } else {
-                JOptionPane.showMessageDialog(this, "Неизвестная ошибка, смотри в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
+                logger.error("Failed to tonnect to device", ex);
             }
         }
+
     }//GEN-LAST:event_connectButtonActionPerformed
 
     private void recordButtonActionPerformed(ActionEvent evt) {//GEN-FIRST:event_recordButtonActionPerformed
@@ -795,33 +729,6 @@ public class NewJFrame extends javax.swing.JFrame {
         }
     }//GEN-LAST:event_zlineActionPerformed
 
-    private void xlineampActionPerformed(ActionEvent evt) {//GEN-FIRST:event_xlineampActionPerformed
-        if (xlineamp.isSelected()) {
-            double[][] data = {tao, x2};
-            dataset.addSeries("xamp", data);
-        } else {
-            dataset.removeSeries("xamp");
-        }
-    }//GEN-LAST:event_xlineampActionPerformed
-
-    private void ylineampActionPerformed(ActionEvent evt) {//GEN-FIRST:event_ylineampActionPerformed
-        if (ylineamp.isSelected()) {
-            double[][] data = {tao, y2};
-            dataset.addSeries("yamp", data);
-        } else {
-            dataset.removeSeries("yamp");
-        }
-    }//GEN-LAST:event_ylineampActionPerformed
-
-    private void zlineampActionPerformed(ActionEvent evt) {//GEN-FIRST:event_zlineampActionPerformed
-        if (zlineamp.isSelected()) {
-            double[][] data = {tao, z2};
-            dataset.addSeries("zamp", data);
-        } else {
-            dataset.removeSeries("zamp");
-        }
-    }//GEN-LAST:event_zlineampActionPerformed
-
     private void jButton1ActionPerformed(ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
         int avg = Integer.parseInt(avgsel.getText());
         createDataset(avg);
@@ -837,7 +744,7 @@ public class NewJFrame extends javax.swing.JFrame {
         record();
         new Thread(() -> {
             try {
-                Thread.sleep(3000);
+                Thread.sleep(1000);
             } catch (InterruptedException ex) {
             }
             int avg = matrix.size() == 0 ? 1 : matrix.size();
@@ -862,7 +769,14 @@ public class NewJFrame extends javax.swing.JFrame {
             JFileChooser f = new JFileChooser();
             FileFilter filter = new FileNameExtensionFilter("CSV (разделители - запятые)", "csv");
             f.setFileFilter(filter);
-            f.showOpenDialog(this);
+            f.setCurrentDirectory(configmanager.getConfig().getDir());
+            int status = f.showOpenDialog(this);
+            configmanager.getConfig().setDir(f.getCurrentDirectory());
+            if (JFileChooser.APPROVE_OPTION != status) {
+                logger.info("Cancelled file opening");
+                return;
+            }
+
             File selectedFile = f.getSelectedFile();
             List readFileToString = FileUtils.readLines(selectedFile);
             String row4 = (String) readFileToString.get(4);
@@ -892,29 +806,11 @@ public class NewJFrame extends javax.swing.JFrame {
             avgsel.setText(average);
             int avg = Integer.parseInt(avgsel.getText());
             createDataset(avg);
-            /*StringBuilder data = new StringBuilder();
-             data.append("zero;").append(xzero).append(";").append(xzero).append(";").append(xzero).append(";0;0;0\n");
-             data.append("time;x;y;z;xamp;yamp;zamp\n");
-             for (int i = 0; i < x1.length; i++) {
-             data.append(tao[i]);
-             data.append(";");
-             data.append(x1[i]);
-             data.append(";");
-             data.append(y1[i]);
-             data.append(";");
-             data.append(z1[i]);
-             data.append(";");
-             data.append(x2[i]);
-             data.append(";");
-             data.append(y2[i]);
-             data.append(";");
-             data.append(z2[i]);
-             data.append("\n");
-             }
-             FileUtils.writeStringToFile(selectedFile, data.toString());*/
+            configmanager.syncConfig();
         } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Неизвестная ошибка, отчёт в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
+            logger.error("Error occured during file open", ex);
+        } catch (ConfigSyncFailException ex) {
+            logger.error("Failed to sync config", ex);
         }
 
     }//GEN-LAST:event_openfilebuttonActionPerformed
@@ -924,7 +820,13 @@ public class NewJFrame extends javax.swing.JFrame {
             JFileChooser f = new JFileChooser();
             FileFilter filter = new FileNameExtensionFilter("CSV (разделители - запятые)", "csv");
             f.setFileFilter(filter);
-            f.showSaveDialog(this);
+            f.setCurrentDirectory(configmanager.getConfig().getDir());
+            int status = f.showSaveDialog(this);
+            configmanager.getConfig().setDir(f.getCurrentDirectory());
+            if (JFileChooser.APPROVE_OPTION != status) {
+                logger.info("Cancelled file saving");
+                return;
+            }
             File selectedFile = f.getSelectedFile();
             String ext = FilenameUtils.getExtension(selectedFile.getAbsolutePath());
             if (!"csv".equals(ext)) {
@@ -937,12 +839,12 @@ public class NewJFrame extends javax.swing.JFrame {
             data.append("\n");
             data.append("\n");
             data.append("\n");
-            data.append(";x;y;z;xamp;yamp;zamp\n");
-            data.append("zero;").append(xzero).append(";").append(yzero).append(";").append(zzero).append(";0;0;0\n");
+            data.append(";x;y;z\n");
+            data.append("zero;").append(xzero).append(";").append(yzero).append(";").append(zzero).append("\n");
             data.append("average;").append(avg).append("\n");
             data.append("measure time;").append(mseconds).append("\n");
             data.append("rows;").append(matrix.size()).append("\n");
-            data.append("x;y;z;xamp;yamp;zamp\n");
+            data.append("x;y;z\n");
             for (int i = 0; i < x1.length; i++) {
                 int[] row = matrix.get(i);
                 data.append(row[0]);
@@ -950,28 +852,43 @@ public class NewJFrame extends javax.swing.JFrame {
                 data.append(row[1]);
                 data.append(";");
                 data.append(row[2]);
-                data.append(";");
-                data.append(row[3]);
-                data.append(";");
-                data.append(row[4]);
-                data.append(";");
-                data.append(row[5]);
                 data.append("\n");
             }
             FileUtils.writeStringToFile(selectedFile, data.toString());
         } catch (IOException ex) {
-                JOptionPane.showMessageDialog(this, "Неизвестная ошибка, смотри в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
+            logger.error("Error occured during file save", ex);
         }
     }//GEN-LAST:event_savefilebuttonActionPerformed
+
+    private void formWindowClosing(WindowEvent evt) {//GEN-FIRST:event_formWindowClosing
+        try {
+            configmanager.syncConfig();
+        } catch (ConfigSyncFailException ex) {
+            logger.error("Failed to sync config", ex);
+        }
+        System.exit(0);
+    }//GEN-LAST:event_formWindowClosing
 
     private boolean called = false;
 
     private void msgReceived() {
         if (!called) {
+            try {
+                String port = connectPort.getText();
+                int speed = Integer.parseInt(connectSpeed.getText());
+
+                configmanager.getConfig().setPort(port);
+                configmanager.getConfig().setSpeed(speed);
+                configmanager.syncConfig();
+
+            } catch (ConfigSyncFailException ex) {
+                logger.error("Failed to sync config", ex);
+            }
+
             called = true;
             recordButton.setEnabled(true);
             zerosetbutton.setEnabled(true);
+
         }
     }
 
@@ -979,6 +896,7 @@ public class NewJFrame extends javax.swing.JFrame {
      * @param args the command line arguments
      */
     public static void main(String args[]) {
+        ApplicationUtility.forceUTF8(logger);
         /* Set the Nimbus look and feel */
         //<editor-fold defaultstate="collapsed" desc=" Look and feel setting code (optional) ">
         /* If Nimbus (introduced in Java SE 6) is not available, stay with the default look and feel.
@@ -1005,34 +923,16 @@ public class NewJFrame extends javax.swing.JFrame {
         }
         //</editor-fold>
 
-        instance = new NewJFrame();
+        File workingDirectory = ApplicationUtility.getWorkingDirectory(APPLICATION_NAME);
+        instance = new NewJFrame(workingDirectory);
         instance.setVisible(true);
 
-    }
-
-    private static void dumpError(Exception ex) {
-        try {
-            Instant now = Instant.now();
-            StringBuilder error = new StringBuilder();
-            error.append("Exception ").append(now.toString()).append('\n');
-            error.append(ex.getMessage()).append('\n');
-            for (StackTraceElement el : ex.getStackTrace()) {
-                error.append('\t').append(el.toString()).append('\n');
-            }
-            File file = new File(getApplicationPath());
-            String format = formatter.format(now);
-            File file2 = new File(file.getParentFile(), "HallSensorApplication Exception (" + format + ").txt"
-            );
-            FileUtils.writeStringToFile(file2, error.toString());
-        } catch (IOException ex1) {
-            System.out.println(ex1);
-        }
     }
 
     private static class PortReader implements SerialPortEventListener {
 
         private String str;
-        private int length = "000:000:000:000:000:000".length();
+        private int length = "000:000:000:".length();
         private int showdelay = 50;
         private int delaycount = 0;
 
@@ -1080,20 +980,18 @@ public class NewJFrame extends javax.swing.JFrame {
                     try {
                         serialPort.closePort();
                     } catch (SerialPortException ex1) {
-                JOptionPane.showMessageDialog(NewJFrame.instance, "Неизвестная ошибка, смотри в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
+                        logger.error("Failed close connetion after fail", ex);
+                    } finally {
+                        logger.error("Error with connection while parsing data", ex);
                     }
-                JOptionPane.showMessageDialog(NewJFrame.instance, "Неизвестная ошибка, смотри в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
                 } catch (Exception ex) {
                     try {
                         serialPort.closePort();
                     } catch (SerialPortException ex1) {
-                JOptionPane.showMessageDialog(NewJFrame.instance, "Неизвестная ошибка, смотри в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
+                        logger.error("Failed close connetion after fail", ex);
+                    } finally {
+                        logger.error("Unknown error while parsing data", ex);
                     }
-                JOptionPane.showMessageDialog(NewJFrame.instance, "Неизвестная ошибка, смотри в файле!", "Ошибка", JOptionPane.ERROR_MESSAGE);
-                dumpError(ex);
                 }
             }
         }
@@ -1114,14 +1012,14 @@ public class NewJFrame extends javax.swing.JFrame {
                     synchronized (lock) {
                         count = array.size();
                         for (int[] row : array) {
-                            for (int i = 0; i < 6; i++) {
+                            for (int i = 0; i < SIZE; i++) {
                                 sum[i] += row[i];
                             }
                         }
                         array.clear();
                     }
 
-                    for (int i = 0; i < 6; i++) {
+                    for (int i = 0; i < SIZE; i++) {
                         fields[i].setText(Long.toString((long) (sum[i] / (double) count)));
                     }
                     try {
@@ -1164,8 +1062,6 @@ public class NewJFrame extends javax.swing.JFrame {
     private JLabel jLabel3;
     private JLabel jLabel4;
     private JLabel jLabel5;
-    private JLabel jLabel6;
-    private JLabel jLabel7;
     private JLabel jLabel8;
     private JLabel jLabel9;
     private JMenu jMenu1;
@@ -1183,21 +1079,14 @@ public class NewJFrame extends javax.swing.JFrame {
     private JLabel s1value;
     private JLabel s2value;
     private JLabel s3value;
-    private JLabel s4value;
-    private JLabel s5value;
-    private JLabel s6value;
     private JMenuItem savefilebutton;
-    private JLabel status;
     private JButton stopButton;
     private JCheckBox xline;
-    private JCheckBox xlineamp;
     private JCheckBox yline;
-    private JCheckBox ylineamp;
     private JButton zerosetbutton;
     private JLabel zerotextx;
     private JLabel zerotexty;
     private JLabel zerotextz;
     private JCheckBox zline;
-    private JCheckBox zlineamp;
     // End of variables declaration//GEN-END:variables
 }
