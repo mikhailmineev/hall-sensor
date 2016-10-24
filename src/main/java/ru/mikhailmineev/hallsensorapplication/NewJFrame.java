@@ -21,14 +21,12 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import static java.lang.Thread.sleep;
 import java.net.URLDecoder;
-import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.logging.Level;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -39,8 +37,10 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JSpinner;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
+import javax.swing.SpinnerNumberModel;
 import javax.swing.WindowConstants;
 import javax.swing.filechooser.FileFilter;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -62,6 +62,7 @@ import ru.mikhailmineev.config.ApplicationUtility;
 import ru.mikhailmineev.config.PreventStartupException;
 import ru.mikhailmineev.config.exceptions.ConfigSyncFailException;
 import ru.mikhailmineev.hallsensorapplication.config.ConfigManager;
+import ru.mikhailmineev.utils.PreventSeveralApplications;
 
 /**
  *
@@ -95,6 +96,7 @@ public class NewJFrame extends javax.swing.JFrame {
     private static final Logger logger = LogManager.getLogger();
     private File workDir;
     private ConfigManager configmanager;
+    private static final Object lock = new Object();
 
     static {
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
@@ -107,6 +109,11 @@ public class NewJFrame extends javax.swing.JFrame {
      * Creates new form NewJFrame
      */
     public NewJFrame(File workDir) {
+        if (!PreventSeveralApplications.lockInstance(workDir)) {
+            JOptionPane.showMessageDialog(this, "Приложение уже активно. Нельзя запустить дважды это приложение.", "", JOptionPane.ERROR_MESSAGE);
+            System.exit(0);
+        }
+
         this.workDir = workDir;
         try {
             this.configmanager = new ConfigManager(workDir);
@@ -129,7 +136,7 @@ public class NewJFrame extends javax.swing.JFrame {
         writer = new Writer(fields);
         dataset = new DefaultXYDataset();
 
-        int avg = Integer.parseInt(avgsel.getText());
+        int avg = (int) avgsel.getValue();
         createDataset(avg);
 
         JFreeChart chart = createChart(dataset);
@@ -152,53 +159,55 @@ public class NewJFrame extends javax.swing.JFrame {
     private double[] tao;
 
     private void createDataset(int avg) {
-        while (dataset.getSeriesCount() > 0) {
-            Comparable seriesKey = dataset.getSeriesKey(0);
-            dataset.removeSeries(seriesKey);
-        }
-        int size = matrix.size() / avg;
-        x1 = new double[size];
-        y1 = new double[size];
-        z1 = new double[size];
-        //v1 = new double[matrix.size()];
-        //v2 = new double[matrix.size()];
-        tao = new double[size];
-        double[][] vertical = {x1, y1, z1};
-        double[] zeros = {xzero, yzero, zzero};
+        synchronized (lock) {
+            while (dataset.getSeriesCount() > 0) {
+                Comparable seriesKey = dataset.getSeriesKey(0);
+                dataset.removeSeries(seriesKey);
+            }
+            int size = matrix.size() / avg;
+            x1 = new double[size];
+            y1 = new double[size];
+            z1 = new double[size];
+            //v1 = new double[matrix.size()];
+            //v2 = new double[matrix.size()];
+            tao = new double[size];
+            double[][] vertical = {x1, y1, z1};
+            double[] zeros = {xzero, yzero, zzero};
 
-        for (int i = 0; i < size; i++) {
-            double time = mseconds / 1000.0;
-            int ticks = size;
-            tao[i] = i * time / (double) ticks;
-            //avg count
-            int[] sum = new int[SIZE];
-            for (int j = i * avg; j < (i + 1) * avg; j++) {
-                int[] row = matrix.get(j);
-                for (int k = 0; k < SIZE; k++) {
-                    sum[k] += row[k];
+            for (int i = 0; i < size; i++) {
+                double time = mseconds / 1000.0;
+                int ticks = size;
+                tao[i] = i * time / (double) ticks;
+                //avg count
+                int[] sum = new int[SIZE];
+                for (int j = i * avg; j < (i + 1) * avg; j++) {
+                    int[] row = matrix.get(j);
+                    for (int k = 0; k < SIZE; k++) {
+                        sum[k] += row[k];
+                    }
                 }
+
+                for (int j = 0; j < SIZE; j++) {
+                    vertical[j][i] = sum[j] * 5 / (1024.0 * avg);
+                    //to zero
+                    vertical[j][i] = vertical[j][i] - zeros[j];
+                }
+                //v1[i] = Math.sqrt(x1[i] * x1[i] + y1[i] * y1[i] + z1[i] * z1[i]);
+                //v2[i] = Math.sqrt(x2[i] * x2[i] + y2[i] * y2[i] + z2[i] * z2[i]);
             }
 
-            for (int j = 0; j < SIZE; j++) {
-                vertical[j][i] = sum[j] * 5 / (1024.0 * avg);
-                //to zero
-                vertical[j][i] = vertical[j][i] - zeros[j];
+            if (xline.isSelected()) {
+                double[][] data = {tao, x1};
+                dataset.addSeries("x", data);
             }
-            //v1[i] = Math.sqrt(x1[i] * x1[i] + y1[i] * y1[i] + z1[i] * z1[i]);
-            //v2[i] = Math.sqrt(x2[i] * x2[i] + y2[i] * y2[i] + z2[i] * z2[i]);
-        }
-
-        if (xline.isSelected()) {
-            double[][] data = {tao, x1};
-            dataset.addSeries("x", data);
-        }
-        if (yline.isSelected()) {
-            double[][] data = {tao, y1};
-            dataset.addSeries("y", data);
-        }
-        if (zline.isSelected()) {
-            double[][] data = {tao, z1};
-            dataset.addSeries("z", data);
+            if (yline.isSelected()) {
+                double[][] data = {tao, y1};
+                dataset.addSeries("y", data);
+            }
+            if (zline.isSelected()) {
+                double[][] data = {tao, z1};
+                dataset.addSeries("z", data);
+            }
         }
     }
 
@@ -260,11 +269,11 @@ public class NewJFrame extends javax.swing.JFrame {
         plotArea = new JPanel();
         jPanel5 = new JPanel();
         jLabel10 = new JLabel();
-        avgsel = new JTextField();
         jButton1 = new JButton();
         xline = new JCheckBox();
         yline = new JCheckBox();
         zline = new JCheckBox();
+        avgsel = new JSpinner();
         jMenuBar1 = new JMenuBar();
         jMenu1 = new JMenu();
         openfilebutton = new JMenuItem();
@@ -533,16 +542,6 @@ public class NewJFrame extends javax.swing.JFrame {
         gridBagConstraints.gridy = 0;
         jPanel5.add(jLabel10, gridBagConstraints);
 
-        avgsel.setText("1");
-        avgsel.setMinimumSize(new Dimension(20, 20));
-        gridBagConstraints = new GridBagConstraints();
-        gridBagConstraints.gridx = 2;
-        gridBagConstraints.gridy = 0;
-        gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
-        gridBagConstraints.ipadx = 5;
-        gridBagConstraints.weightx = 1.0;
-        jPanel5.add(avgsel, gridBagConstraints);
-
         jButton1.setText("ОК");
         jButton1.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent evt) {
@@ -595,6 +594,12 @@ public class NewJFrame extends javax.swing.JFrame {
         gridBagConstraints.gridwidth = 5;
         gridBagConstraints.fill = GridBagConstraints.HORIZONTAL;
         jPanel5.add(zline, gridBagConstraints);
+
+        avgsel.setModel(new SpinnerNumberModel(1, 1, null, 1));
+        gridBagConstraints = new GridBagConstraints();
+        gridBagConstraints.gridx = 2;
+        gridBagConstraints.gridy = 0;
+        jPanel5.add(avgsel, gridBagConstraints);
 
         gridBagConstraints = new GridBagConstraints();
         gridBagConstraints.gridx = 0;
@@ -687,7 +692,7 @@ public class NewJFrame extends javax.swing.JFrame {
     }
 
     private void stopButtonActionPerformed(ActionEvent evt) {//GEN-FIRST:event_stopButtonActionPerformed
-        int avg = Integer.parseInt(avgsel.getText());
+        int avg = (int) avgsel.getValue();
         stop(avg);
         stopButton.setEnabled(false);
         recordButton.setEnabled(true);
@@ -730,7 +735,7 @@ public class NewJFrame extends javax.swing.JFrame {
     }//GEN-LAST:event_zlineActionPerformed
 
     private void jButton1ActionPerformed(ActionEvent evt) {//GEN-FIRST:event_jButton1ActionPerformed
-        int avg = Integer.parseInt(avgsel.getText());
+        int avg = (int) avgsel.getValue();
         createDataset(avg);
     }//GEN-LAST:event_jButton1ActionPerformed
 
@@ -747,15 +752,16 @@ public class NewJFrame extends javax.swing.JFrame {
                 Thread.sleep(1000);
             } catch (InterruptedException ex) {
             }
-            int avg = matrix.size() == 0 ? 1 : matrix.size();
-            stop(avg);
+            //this average forces co calculate for all numbers average
+            int average = matrix.size() == 0 ? 1 : matrix.size();
+            stop(average);
             xzero = x1[0];
             yzero = y1[0];
             zzero = z1[0];
             zerotextx.setText("Ноль x=" + xzero);
             zerotexty.setText("Ноль y=" + yzero);
             zerotextz.setText("Ноль z=" + zzero);
-            avg = Integer.parseInt(avgsel.getText());
+            int avg = (int) avgsel.getValue();
             createDataset(avg);
             stopButton.setEnabled(false);
             recordButton.setEnabled(true);
@@ -783,6 +789,7 @@ public class NewJFrame extends javax.swing.JFrame {
             String[] zeros = row4.split(";");//zero
             String row5 = (String) readFileToString.get(5);
             String average = row5.split(";")[1];//average
+            int avg = Integer.parseInt(average);
             String row6 = (String) readFileToString.get(6);
             long measuretime = Long.parseLong(row6.split(";")[1]);//measure time
             String row7 = (String) readFileToString.get(7);
@@ -803,8 +810,7 @@ public class NewJFrame extends javax.swing.JFrame {
             yzero = Double.parseDouble(zeros[2]);
             zzero = Double.parseDouble(zeros[3]);
             mseconds = measuretime;
-            avgsel.setText(average);
-            int avg = Integer.parseInt(avgsel.getText());
+            avgsel.setValue(avg);
             createDataset(avg);
             configmanager.syncConfig();
         } catch (IOException ex) {
@@ -833,7 +839,7 @@ public class NewJFrame extends javax.swing.JFrame {
                 selectedFile = new File(selectedFile.getParent(), selectedFile.getName() + ".csv");
             }
 
-            int avg = Integer.parseInt(avgsel.getText());
+            int avg = (int) avgsel.getValue();
 
             StringBuilder data = new StringBuilder();
             data.append("\n");
@@ -1051,7 +1057,7 @@ public class NewJFrame extends javax.swing.JFrame {
 
 
     // Variables declaration - do not modify//GEN-BEGIN:variables
-    private JTextField avgsel;
+    private JSpinner avgsel;
     private JButton connectButton;
     private JTextField connectPort;
     private JTextField connectSpeed;
