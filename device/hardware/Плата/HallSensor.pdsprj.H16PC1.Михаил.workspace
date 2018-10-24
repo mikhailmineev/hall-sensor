@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<WORKSPACE>
+ <FRAME activewindow="0">
+  <PLACEMENT>2c0000000200000003000000ffffffffffffffffffffffffffffffffb1f9ffff0c000000bffffffff0030000</PLACEMENT>
+  <WINDOW type="default" module="ISIS"/>
+  <WINDOW type="default" module="ARES"/>
+  <WINDOW type="default" module="VSMSTUDIO">
+   <FILE ACTIVE="TRUE" NAME="ATmega328P/main.ino"/>
+   <STATE NAME="EDIT" VALUE="AAAA/wAAAAH9AAAAAgAAAAAAAAEAAAACnfwCAAAAAfsAAAAQAFAAcgBvAGoAZQBjAHQAcwEAAAAAAAACnQAAASwA////AAAAAwAABogAAADY/AEAAAAB+wAAACAATwB1AHQAcAB1AHQARABvAGMAawBXAGkAZABnAGUAdAEAAAAAAAAGiAAAAEcA////AAAFhAAAAp0AAAABAAAAAgAAAAgAAAAC/AAAAAA="/>
+   <PROJECT ACTIVE="TRUE" NAME="ATmega328P" CONFIGURATION="Debug"/>
+  </WINDOW>
+  <WINDOW type="VIEW3D" module="VIEW3D">
+   <camera>
+    <position x="-381000" y="-7679432" z="7869931"/>
+    <focus x="-381000" y="190500" z="0"/>
+    <up x="0" y="707106" z="707106"/>
+   </camera>
+  </WINDOW>
+ </FRAME>
+ <MODULE name="VSMDEBUG">
+  <PWI/>
+ </MODULE>
+</WORKSPACE>
